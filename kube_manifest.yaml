@@ -1,68 +1,87 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-app
+  name: web-app
   labels:
-    app: my-app
+    app: web-app
 spec:
-  replicas: 4  # Первоначально запускаем 4 пода для пиковой нагрузки
+  replicas: 4
   selector:
     matchLabels:
-      app: my-app
+      app: web-app
   template:
     metadata:
       labels:
-        app: my-app
+        app: web-app
     spec:
       containers:
-      - name: my-app-container
-        image: my-app-image:latest
+      - name: web-app-container
+        image: web-app-image:0.0.1
         resources:
           requests:
-            cpu: "0.1"  # Регулярное потребление CPU после инициализации
-            memory: "128Mi"  # Постоянное потребление памяти
+            memory: "128Mi"
+            cpu: "100m"
           limits:
-            cpu: "0.5"  # Ограничение на CPU для обработки первых запросов
-            memory: "256Mi"  # Небольшой запас памяти для пиковых моментов
+            memory: "256Mi"  # Ограничение памяти
+            cpu: "500m"
         readinessProbe:
           httpGet:
-            path: /healthz
-            port: 8080
-          initialDelaySeconds: 15  # Учитываем время на инициализацию
-          periodSeconds: 10
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: 80
           initialDelaySeconds: 30
           periodSeconds: 10
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - my-app
-              topologyKey: "kubernetes.io/hostname"  # Обеспечение отказоустойчивости через распределение подов по разным хостам
+        ports:
+        - containerPort: 80
 
 ---
-apiVersion: autoscaling/v2beta2
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-service
+  labels:
+    app: web-app
+spec:
+  type: ClusterIP
+  selector:
+    app: web-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+
+---
+apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: my-app-hpa
+  name: web-app-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: my-app
-  minReplicas: 2  # Минимальное количество подов ночью
-  maxReplicas: 10  # Максимальное количество подов в пиковое время
+    name: web-app
+  minReplicas: 4
+  maxReplicas: 6
   metrics:
   - type: Resource
     resource:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 50  # Целевая загрузка CPU для автоскейлинга
+        averageUtilization: 50
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-app-pdb
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app: web-app
